@@ -1,0 +1,13 @@
+import './dashboard';
+import './conversations';
+import './customers';
+import './booking';
+import './commerce';
+import './chatbots';
+import './reports';
+import './integrations';
+import './users';
+import './audit';
+import './settings';
+import './misc';
+import './demo';

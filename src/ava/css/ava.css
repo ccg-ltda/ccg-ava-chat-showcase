@@ -1,0 +1,1282 @@
+/*
+ * Access screens (pre-login / login): background grid, particles, card, form controls, toasts.
+ *
+ * The look is derived from the application design tokens declared in app.css (--color-primary,
+ * --color-surface-*, --color-ink, --color-line, --radius-card, --shadow-card-hover, Inter...), so the
+ * login reads as the same platform as the pages after signing in. Light mode keeps the light backdrop;
+ * dark mode keeps the dark backdrop and uses the navy surface of the sidebar/top bar for the card.
+ *
+ * Only the global resets are scoped to `.ava`. Lives in the `components` layer so Tailwind utilities still win.
+ */
+@layer components {
+    /* ---- Tokens: light (default) ---- */
+    :root,
+    html.light {
+        --bg-primary: var(--color-canvas);
+        --bg-card: rgb(255 255 255 / 0.96);
+        --text-primary: var(--color-ink);
+        --text-secondary: var(--color-ink-muted);
+        --text-muted: color-mix(in srgb, var(--color-ink-muted) 70%, transparent);
+        --accent: var(--color-primary);
+        --accent-strong: var(--color-primary-strong);
+        --accent-contrast: #fff;
+        --accent-soft: var(--color-primary-soft);
+        --accent-secondary: var(--color-accent-violet);
+        --success: var(--color-accent-green);
+        --warning: var(--color-accent-amber);
+        --danger: var(--color-danger);
+        --border-color: var(--color-line);
+        --input-bg: var(--color-card);
+        --input-border: color-mix(in srgb, var(--color-ink-muted) 35%, var(--color-line));
+        --card-shadow: var(--shadow-card-hover);
+        --grid-color: color-mix(in srgb, var(--color-primary) 7%, transparent);
+        --svg-line-color: color-mix(in srgb, var(--color-primary) 40%, transparent);
+        --toast-bg: var(--color-card);
+        --toast-shadow: var(--shadow-card-hover);
+        --focus-ring: color-mix(in srgb, var(--color-primary) 22%, transparent);
+    }
+
+    /* ---- Tokens: dark (same backdrop as before, card on the navy surface of the app shell) ---- */
+    html.dark {
+        --bg-primary: #0a0a0f;
+        --bg-card: color-mix(in srgb, var(--color-surface-deepest) 90%, transparent);
+        --text-primary: #e2e8f0;
+        --text-secondary: color-mix(in srgb, #e2e8f0 68%, transparent);
+        --text-muted: color-mix(in srgb, #e2e8f0 45%, transparent);
+        --accent: color-mix(in srgb, var(--color-primary-soft) 70%, var(--color-surface-light));
+        --accent-strong: var(--color-primary-soft);
+        --accent-contrast: #fff;
+        --accent-soft: color-mix(in srgb, var(--color-surface-light) 25%, transparent);
+        --accent-secondary: color-mix(in srgb, var(--color-accent-violet) 40%, #fff);
+        --success: color-mix(in srgb, var(--color-accent-green) 60%, #fff);
+        --warning: color-mix(in srgb, var(--color-accent-amber) 55%, #fff);
+        --danger: color-mix(in srgb, var(--color-danger) 65%, #fff);
+        --border-color: color-mix(in srgb, #fff 14%, transparent);
+        --input-bg: color-mix(in srgb, var(--color-surface-deep) 55%, #000);
+        --input-border: color-mix(in srgb, #fff 20%, transparent);
+        --card-shadow: 0 24px 60px rgb(0 0 0 / 0.55), 0 2px 8px rgb(0 0 0 / 0.4);
+        --grid-color: color-mix(in srgb, var(--color-surface-light) 12%, transparent);
+        --svg-line-color: color-mix(in srgb, var(--color-surface-light) 60%, transparent);
+        --toast-bg: color-mix(in srgb, var(--color-surface-deepest) 96%, transparent);
+        --toast-shadow: 0 10px 30px rgb(0 0 0 / 0.5);
+        --focus-ring: color-mix(in srgb, var(--color-surface-light) 45%, transparent);
+    }
+
+    .ava,
+    .ava *,
+    .ava *::before,
+    .ava *::after {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+
+    .ava {
+        font-family: var(--font-sans);
+        color: var(--text-primary);
+    }
+
+    html:has(.ava),
+    body:has(.ava) {
+        width: 100%;
+        min-height: 100%;
+        overflow-x: hidden;
+        font-family: var(--font-sans);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        transition: background 0.5s ease, color 0.5s ease;
+    }
+
+    .cyber-grid-bg {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 0;
+        background-color: var(--bg-primary);
+        background-image:
+            linear-gradient(var(--grid-color) 1px, transparent 1px),
+            linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+        background-size: 60px 60px;
+        transition: background-color 0.5s ease, background-image 0.5s ease;
+    }
+
+    .cyber-grid-bg::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: radial-gradient(ellipse at center, transparent 0%, var(--bg-primary) 70%);
+        transition: background 0.5s ease;
+    }
+
+    #three-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 1;
+        pointer-events: none;
+    }
+
+    #three-container canvas {
+        display: block;
+    }
+
+    .svg-connections {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 5;
+        pointer-events: none;
+    }
+
+    .svg-connections line {
+        stroke: var(--svg-line-color);
+        stroke-width: 1;
+        stroke-dasharray: 4 4;
+        animation: dashMove 2s linear infinite;
+        transition: stroke 0.5s ease;
+    }
+
+    @keyframes dashMove {
+        to {
+            stroke-dashoffset: -8;
+        }
+    }
+
+    .theme-toggle {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        z-index: 1000;
+        width: 44px;
+        height: 44px;
+        border-radius: 9999px;
+        border: 1px solid var(--border-color);
+        background: var(--bg-card);
+        color: var(--accent);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        transition: background-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+        backdrop-filter: blur(10px);
+        box-shadow: var(--toast-shadow);
+    }
+
+    .theme-toggle:hover {
+        background: var(--input-bg);
+        transform: scale(1.06);
+    }
+
+    .theme-toggle:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 3px;
+    }
+
+    .login-wrapper {
+        position: relative;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        min-height: 100vh;
+        min-height: 100dvh;
+        padding: 20px;
+    }
+
+    .login-card {
+        position: relative;
+        width: 100%;
+        max-width: 440px;
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-card);
+        padding: 40px 35px;
+        backdrop-filter: blur(20px);
+        box-shadow: var(--card-shadow);
+        transition: background-color 0.5s ease, border-color 0.5s ease, box-shadow 0.5s ease;
+    }
+
+    .logo-section {
+        text-align: center;
+        margin-bottom: 32px;
+    }
+
+    /* The mascot (public/brand/mascota-transparente.png, real alpha) above the brand name: fixed width, height from its own proportions, no frame, no shadow. */
+    .logo-section .logo-mark {
+        width: 104px;
+        margin: 0 auto 14px;
+        line-height: 0;
+    }
+
+    .logo-mark img {
+        display: block;
+        width: 100%;
+        height: auto;
+    }
+
+    .logo-section h1 {
+        font-size: 20px;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        color: var(--accent);
+        text-transform: uppercase;
+        margin-bottom: 6px;
+        overflow-wrap: anywhere;
+        transition: color 0.5s ease;
+    }
+
+    .logo-section p {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        letter-spacing: 0.04em;
+        transition: color 0.5s ease;
+    }
+
+    .input-group {
+        position: relative;
+        margin-bottom: 22px;
+    }
+
+    .input-group label {
+        display: block;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        margin-bottom: 8px;
+        transition: color 0.5s ease;
+    }
+
+    .input-group input {
+        width: 100%;
+        padding: 12px 45px 12px 14px;
+        background: var(--input-bg);
+        border: 1px solid var(--input-border);
+        border-radius: 8px;
+        color: var(--text-primary);
+        font-family: inherit;
+        font-size: 15px;
+        font-weight: 500;
+        outline: none;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.5s ease;
+    }
+
+    .input-group input::placeholder {
+        color: var(--text-muted);
+    }
+
+    .input-group input:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--focus-ring);
+    }
+
+    .input-group input.error {
+        border-color: var(--danger);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent);
+    }
+
+    .input-group input.success {
+        border-color: var(--success);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 18%, transparent);
+    }
+
+    .password-wrapper {
+        position: relative;
+    }
+
+    .password-toggle {
+        position: absolute;
+        right: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: none;
+        border: none;
+        border-radius: 6px;
+        color: var(--text-muted);
+        cursor: pointer;
+        padding: 5px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: color 0.2s ease;
+        z-index: 2;
+    }
+
+    .password-toggle:hover {
+        color: var(--accent);
+    }
+
+    .password-toggle:focus-visible {
+        outline: 2px solid var(--accent);
+    }
+
+    .password-toggle svg {
+        width: 20px;
+        height: 20px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+    }
+
+    .error-message {
+        font-size: 12px;
+        color: var(--danger);
+        margin-top: 6px;
+        display: none;
+        font-weight: 500;
+    }
+
+    .error-message.show {
+        display: block;
+    }
+
+    .remember-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 28px;
+    }
+
+    .remember-row label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: color 0.5s ease;
+    }
+
+    .remember-row label input[type='checkbox'] {
+        accent-color: var(--accent);
+        width: 16px;
+        height: 16px;
+    }
+
+    .remember-row a {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--accent);
+        text-decoration: none;
+    }
+
+    .remember-row a:hover,
+    .footer-text a:hover {
+        text-decoration: underline;
+    }
+
+    /* Primary action: same solid blue as the application's primary buttons. */
+    .login-btn {
+        width: 100%;
+        padding: 13px 16px;
+        background: var(--color-primary);
+        border: 1px solid transparent;
+        border-radius: 8px;
+        color: var(--accent-contrast);
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        cursor: pointer;
+        box-shadow: var(--shadow-card);
+        transition: background-color 0.2s ease, box-shadow 0.2s ease, transform 0.1s ease;
+    }
+
+    html.dark .login-btn {
+        background: var(--color-surface-light);
+        border-color: color-mix(in srgb, #fff 18%, transparent);
+    }
+
+    .login-btn:hover {
+        background: var(--color-primary-strong);
+    }
+
+    html.dark .login-btn:hover {
+        background: color-mix(in srgb, var(--color-surface-light) 80%, #fff);
+    }
+
+    .login-btn:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 3px;
+    }
+
+    .login-btn:active {
+        transform: scale(0.99);
+    }
+
+    .login-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    .footer-text {
+        text-align: center;
+        margin-top: 24px;
+        font-size: 12px;
+        color: var(--text-muted);
+        transition: color 0.5s ease;
+    }
+
+    .footer-text a {
+        color: var(--accent-secondary);
+        font-weight: 600;
+        text-decoration: none;
+    }
+
+    .toast-container {
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        z-index: 2000;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .toast {
+        padding: 12px 18px;
+        background: var(--toast-bg);
+        border: 1px solid var(--border-color);
+        border-left: 3px solid var(--accent);
+        border-radius: 10px;
+        color: var(--text-primary);
+        font-size: 14px;
+        font-weight: 500;
+        backdrop-filter: blur(15px);
+        box-shadow: var(--toast-shadow);
+        transform: translateX(120%);
+        transition: transform 0.4s ease, opacity 0.4s ease;
+        opacity: 0;
+    }
+
+    .toast.show {
+        transform: translateX(0);
+        opacity: 1;
+    }
+
+    .toast.error {
+        border-left-color: var(--danger);
+    }
+
+    .toast.success {
+        border-left-color: var(--success);
+    }
+
+    .toast.warning {
+        border-left-color: var(--warning);
+    }
+
+    @keyframes pulse {
+        0%,
+        100% {
+            opacity: 1;
+        }
+        50% {
+            opacity: 0.5;
+        }
+    }
+
+    .pulse {
+        animation: pulse 2s ease-in-out infinite;
+    }
+
+    @media (max-width: 480px) {
+        .login-wrapper {
+            padding-top: 75px;
+        }
+
+        .login-card {
+            padding: 30px 20px;
+        }
+
+        .logo-section h1 {
+            font-size: 18px;
+        }
+
+        .theme-toggle {
+            width: 40px;
+            height: 40px;
+            top: 15px;
+            right: 15px;
+            font-size: 16px;
+        }
+    }
+
+    /* Workspace selection badge */
+    .workspace-badge {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 22px;
+        padding: 10px 14px;
+        background: var(--accent-soft);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        font-size: 13px;
+        color: var(--text-secondary);
+        transition: background-color 0.5s ease, border-color 0.5s ease;
+    }
+
+    .workspace-badge strong {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        color: var(--accent);
+    }
+
+    .workspace-badge button {
+        background: none;
+        border: none;
+        padding: 0;
+        font: inherit;
+        font-weight: 600;
+        color: var(--accent);
+        cursor: pointer;
+    }
+
+    .workspace-badge button:hover {
+        text-decoration: underline;
+    }
+
+    .workspace-badge button:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+    }
+
+    /* ---- Public sign-up wizard: same card, tokens and controls as the login, in a wider centered panel ---- */
+    .login-card.signup-card {
+        max-width: 860px;
+        padding: 36px 40px;
+    }
+
+    .signup-card .logo-section {
+        margin-bottom: 22px;
+    }
+
+    .signup-steps {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 4px;
+        margin: 0 0 28px;
+        padding: 0;
+        list-style: none;
+        counter-reset: step;
+    }
+
+    .signup-steps li {
+        position: relative;
+        flex: 1 1 0;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-align: center;
+        color: var(--text-muted);
+        counter-increment: step;
+    }
+
+    .signup-steps li::before {
+        content: counter(step);
+        z-index: 1;
+        width: 28px;
+        height: 28px;
+        display: grid;
+        place-items: center;
+        border-radius: 999px;
+        border: 1px solid var(--input-border);
+        background: var(--input-bg);
+        color: var(--text-secondary);
+        font-size: 12px;
+        font-weight: 700;
+    }
+
+    .signup-steps li::after {
+        content: '';
+        position: absolute;
+        top: 14px;
+        left: calc(50% + 18px);
+        width: calc(100% - 36px);
+        height: 2px;
+        background: var(--border-color);
+    }
+
+    .signup-steps li:last-child::after {
+        display: none;
+    }
+
+    .signup-steps li[data-state='done'] {
+        color: var(--text-secondary);
+    }
+
+    .signup-steps li[data-state='done']::before {
+        content: '✓';
+        background: var(--accent-soft);
+        border-color: var(--accent);
+        color: var(--accent);
+    }
+
+    .signup-steps li[data-state='done']::after {
+        background: var(--accent);
+    }
+
+    .signup-steps li[data-state='current'] {
+        color: var(--text-primary);
+    }
+
+    .signup-steps li[data-state='current']::before {
+        background: var(--color-primary);
+        border-color: transparent;
+        color: var(--accent-contrast);
+        box-shadow: 0 0 0 4px var(--focus-ring);
+    }
+
+    html.dark .signup-steps li[data-state='current']::before {
+        background: var(--color-surface-light);
+    }
+
+    .signup-title {
+        font-size: 20px;
+        font-weight: 800;
+        color: var(--text-primary);
+        margin-bottom: 6px;
+    }
+
+    .signup-lead {
+        font-size: 14px;
+        line-height: 1.55;
+        color: var(--text-secondary);
+        margin-bottom: 22px;
+    }
+
+    .signup-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        column-gap: 18px;
+    }
+
+    .signup-grid .full {
+        grid-column: 1 / -1;
+    }
+
+    .signup-note {
+        display: flex;
+        gap: 12px;
+        margin: 4px 0 22px;
+        padding: 14px 16px;
+        background: var(--accent-soft);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        font-size: 13px;
+        line-height: 1.55;
+        color: var(--text-secondary);
+    }
+
+    .signup-note strong {
+        color: var(--text-primary);
+    }
+
+    .signup-note.warning {
+        background: color-mix(in srgb, var(--warning) 12%, transparent);
+        border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+    }
+
+    .signup-note.success {
+        background: color-mix(in srgb, var(--success) 12%, transparent);
+        border-color: color-mix(in srgb, var(--success) 40%, transparent);
+    }
+
+    .signup-example {
+        display: block;
+        margin-top: 8px;
+        font-style: italic;
+        color: var(--text-muted);
+    }
+
+    .signup-hint {
+        margin-top: 6px;
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+
+    .signup-hint.ok {
+        color: var(--success);
+        font-weight: 600;
+    }
+
+    .signup-hint.bad {
+        color: var(--danger);
+        font-weight: 600;
+    }
+
+    .choice-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+        gap: 16px;
+        margin-bottom: 26px;
+    }
+
+    .choice-card {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 20px 18px;
+        text-align: left;
+        font: inherit;
+        color: var(--text-primary);
+        background: var(--input-bg);
+        border: 1px solid var(--input-border);
+        border-radius: 12px;
+        cursor: pointer;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease, background-color 0.5s ease;
+    }
+
+    .choice-card:hover {
+        border-color: var(--accent);
+        transform: translateY(-2px);
+    }
+
+    .choice-card:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 3px;
+    }
+
+    .choice-card[aria-checked='true'] {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+        box-shadow: 0 0 0 3px var(--focus-ring);
+    }
+
+    .choice-card[aria-checked='true']::after {
+        content: '✓';
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        width: 22px;
+        height: 22px;
+        display: grid;
+        place-items: center;
+        border-radius: 999px;
+        background: var(--accent);
+        color: var(--accent-contrast);
+        font-size: 13px;
+        font-weight: 700;
+    }
+
+    .choice-card[aria-disabled='true'] {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+    }
+
+    .choice-icon {
+        width: 42px;
+        height: 42px;
+        display: grid;
+        place-items: center;
+        border-radius: 10px;
+        background: var(--accent-soft);
+        color: var(--accent);
+    }
+
+    .choice-icon svg {
+        width: 22px;
+        height: 22px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+    }
+
+    .choice-name {
+        font-size: 16px;
+        font-weight: 800;
+    }
+
+    .choice-text {
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--text-secondary);
+    }
+
+    .choice-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: auto;
+    }
+
+    .choice-card[aria-checked='true'] .choice-tag {
+        background: var(--bg-card);
+        border-color: var(--accent);
+    }
+
+    .choice-tag {
+        padding: 3px 9px;
+        border-radius: 999px;
+        border: 1px solid var(--border-color);
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-secondary);
+    }
+
+    .plan-price {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        color: var(--text-primary);
+    }
+
+    .plan-price strong {
+        font-size: 24px;
+        font-weight: 800;
+    }
+
+    .plan-price span {
+        font-size: 12px;
+        color: var(--text-secondary);
+    }
+
+    .period-options {
+        display: grid;
+        gap: 6px;
+    }
+
+    .period-option {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+        width: 100%;
+        padding: 8px 10px;
+        border-radius: 10px;
+        border: 1px solid var(--border-color);
+        background: var(--bg-card);
+        color: var(--text-primary);
+        font: inherit;
+        cursor: pointer;
+        text-align: left;
+    }
+
+    .period-option:hover {
+        border-color: var(--accent);
+    }
+
+    .period-option:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+    }
+
+    .period-option[aria-checked='true'] {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 1px var(--accent);
+    }
+
+    .period-option span {
+        font-size: 12px;
+        color: var(--text-secondary);
+    }
+
+    .period-option strong {
+        font-size: 15px;
+        font-weight: 800;
+    }
+
+    .plan-link {
+        align-self: flex-start;
+        padding: 0;
+        background: none;
+        border: none;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--accent);
+        cursor: pointer;
+    }
+
+    .plan-link:hover {
+        text-decoration: underline;
+    }
+
+    .plan-link:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+    }
+
+    .signup-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 18px;
+    }
+
+    .signup-actions .group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .signup-actions .login-btn {
+        width: auto;
+        min-width: 160px;
+    }
+
+    .btn-ghost {
+        padding: 12px 18px;
+        background: transparent;
+        border: 1px solid var(--input-border);
+        border-radius: 8px;
+        color: var(--text-secondary);
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: border-color 0.2s ease, color 0.2s ease;
+    }
+
+    .btn-ghost:hover:not(:disabled) {
+        border-color: var(--accent);
+        color: var(--accent);
+    }
+
+    .btn-ghost:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 3px;
+    }
+
+    .btn-ghost:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+    }
+
+    .code-input {
+        letter-spacing: 0.5em;
+        font-size: 24px;
+        font-weight: 700;
+        text-align: center;
+    }
+
+    .summary-list {
+        margin: 0 0 22px;
+        padding: 0;
+        list-style: none;
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        overflow: hidden;
+    }
+
+    .summary-list li {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 12px 16px;
+        font-size: 14px;
+        color: var(--text-secondary);
+    }
+
+    .summary-list li + li {
+        border-top: 1px solid var(--border-color);
+    }
+
+    .summary-list li strong {
+        color: var(--text-primary);
+        text-align: right;
+        overflow-wrap: anywhere;
+    }
+
+    /* Summary of the contract: three grouped blocks, centered, each label next to its value (not pushed to opposite edges). */
+    .summary-table {
+        display: grid;
+        gap: 14px;
+        max-width: 560px;
+        margin: 0 auto 22px;
+    }
+
+    .summary-table section {
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        overflow: hidden;
+    }
+
+    .summary-table h3 {
+        margin: 0;
+        padding: 9px 16px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        text-align: center;
+        color: var(--text-secondary);
+        background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .summary-table dl {
+        margin: 0;
+    }
+
+    .summary-table dl > div {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+        column-gap: 16px;
+        padding: 10px 16px;
+        font-size: 14px;
+    }
+
+    .summary-table dl > div + div {
+        border-top: 1px solid var(--border-color);
+    }
+
+    .summary-table dt {
+        text-align: right;
+        color: var(--text-secondary);
+    }
+
+    .summary-table dd {
+        margin: 0;
+        text-align: left;
+        font-weight: 600;
+        color: var(--text-primary);
+        overflow-wrap: anywhere;
+    }
+
+    .summary-table .highlight dd {
+        color: var(--accent);
+    }
+
+    @media (max-width: 520px) {
+        .summary-table dl > div {
+            grid-template-columns: minmax(0, 1fr);
+            row-gap: 2px;
+            text-align: center;
+        }
+
+        .summary-table dt,
+        .summary-table dd {
+            text-align: center;
+        }
+    }
+
+    .check-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        margin-bottom: 12px;
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--text-secondary);
+        cursor: pointer;
+    }
+
+    .check-row input {
+        margin-top: 3px;
+        accent-color: var(--accent);
+        width: 16px;
+        height: 16px;
+    }
+
+    .check-row a {
+        color: var(--accent);
+        font-weight: 600;
+    }
+
+    .signup-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 2500;
+        display: grid;
+        place-items: center;
+        padding: 16px;
+        background: rgb(5 10 25 / 0.6);
+        backdrop-filter: blur(4px);
+    }
+
+    .signup-modal {
+        width: 100%;
+        max-width: 560px;
+        max-height: min(80vh, 640px);
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-card);
+        color: var(--text-primary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-card);
+        box-shadow: var(--card-shadow);
+        font-family: var(--font-sans);
+    }
+
+    html.dark .signup-modal {
+        background: var(--color-surface-deepest);
+    }
+
+    .signup-modal header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 18px 22px;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .signup-modal h2 {
+        font-size: 17px;
+        font-weight: 800;
+    }
+
+    .signup-modal ul {
+        margin: 0;
+        padding: 6px 22px 18px;
+        overflow-y: auto;
+        list-style: none;
+    }
+
+    .signup-modal li {
+        padding: 12px 0;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .signup-modal li:last-child {
+        border-bottom: none;
+    }
+
+    .signup-modal li strong {
+        display: block;
+        font-size: 14px;
+    }
+
+    .signup-modal li span {
+        display: block;
+        margin-top: 2px;
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--text-secondary);
+    }
+
+    .signup-modal-close {
+        background: none;
+        border: none;
+        padding: 6px 8px;
+        border-radius: 6px;
+        font: inherit;
+        font-size: 20px;
+        line-height: 1;
+        color: var(--text-secondary);
+        cursor: pointer;
+    }
+
+    .signup-modal-close:hover {
+        color: var(--accent);
+    }
+
+    .signup-modal-close:focus-visible {
+        outline: 2px solid var(--accent);
+    }
+
+    .signup-link-row {
+        margin-top: 22px;
+        text-align: center;
+        font-size: 13px;
+        color: var(--text-muted);
+    }
+
+    .signup-link-row a,
+    .signup-link-row button.plan-link {
+        color: var(--accent);
+        font-weight: 700;
+        text-decoration: none;
+    }
+
+    .signup-link-row a:hover {
+        text-decoration: underline;
+    }
+
+    .login-signup {
+        margin-top: 22px;
+        padding-top: 18px;
+        border-top: 1px solid var(--border-color);
+        text-align: center;
+        font-size: 13px;
+        color: var(--text-secondary);
+    }
+
+    .login-signup a {
+        display: inline-block;
+        margin-top: 6px;
+        padding: 10px 18px;
+        border: 1px solid var(--accent);
+        border-radius: 8px;
+        color: var(--accent);
+        font-weight: 700;
+        text-decoration: none;
+        transition: background-color 0.2s ease;
+    }
+
+    .login-signup a:hover {
+        background: var(--accent-soft);
+    }
+
+    .login-signup a:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 3px;
+    }
+
+    @media (max-width: 720px) {
+        .login-card.signup-card {
+            padding: 28px 18px;
+        }
+
+        .signup-grid {
+            grid-template-columns: minmax(0, 1fr);
+        }
+
+        .signup-steps li {
+            font-size: 0;
+        }
+
+        .signup-steps li[data-state='current'] {
+            font-size: 11px;
+        }
+
+        .signup-actions {
+            flex-direction: column-reverse;
+            align-items: stretch;
+        }
+
+        .signup-actions .group {
+            flex-direction: column-reverse;
+        }
+
+        .signup-actions .login-btn,
+        .btn-ghost {
+            width: 100%;
+        }
+    }
+}

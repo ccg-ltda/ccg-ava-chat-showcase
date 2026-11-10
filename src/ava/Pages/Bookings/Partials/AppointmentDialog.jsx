@@ -1,0 +1,273 @@
+import { ClientNameField, RelationStatus, SaveInListing } from './ClientPicker';
+import { router } from '@inertiajs/react';
+import { UserRound } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { locationsForService, professionalsFor, stillCompatible } from '@/lib/bookingCompat';
+import Alert from '@/Components/Alert';
+import DateField from '@/Components/DateField';
+import InputError from '@/Components/InputError';
+import InputLabel from '@/Components/InputLabel';
+import Modal from '@/Components/Modal';
+import PrimaryButton from '@/Components/PrimaryButton';
+import SecondaryButton from '@/Components/SecondaryButton';
+import SearchableSelect from '@/Components/SearchableSelect';
+import Select from '@/Components/Select';
+import Textarea from '@/Components/Textarea';
+import TextInput from '@/Components/TextInput';
+import { getJson, longDayLabel } from '@/config/bookings';
+
+/**
+ * Picks WHEN: the free starts the agenda really offers for a service (and optionally a professional) over a few days. Nothing is
+ * typed by hand: only a start the server computed can be chosen, and the server checks it again when it is saved.
+ */
+function SlotPicker({ serviceId, professionalId, locationId, from, value, onPick, ignoreAppointment }) {
+    const [state, setState] = useState({ loading: false, slots: [], error: null });
+
+    useEffect(() => {
+        if (!serviceId) return undefined;
+        let live = true;
+        setState({ loading: true, slots: [], error: null });
+
+        getJson(route('bookings.availability'), { service_id: serviceId, professional_id: professionalId || undefined, location_id: locationId || undefined, from, days: 7, ignore_appointment: ignoreAppointment })
+            .then((body) => live && setState({ loading: false, slots: body.slots, error: null }))
+            .catch((error) => live && setState({ loading: false, slots: [], error: error.message }));
+
+        return () => {
+            live = false;
+        };
+    }, [serviceId, professionalId, locationId, from, ignoreAppointment]);
+
+    if (!serviceId) return <p className="text-sm text-ink-muted">Elige un servicio para ver los horarios libres.</p>;
+    if (state.loading) return <p className="text-sm text-ink-muted" role="status">Buscando horarios…</p>;
+    if (state.error) return <Alert tone="warning">{state.error}</Alert>;
+    if (state.slots.length === 0) return <p className="text-sm text-ink-muted">No hay horarios libres en estos días. Prueba con otra fecha o profesional.</p>;
+
+    const byDay = state.slots.reduce((groups, slot) => ({ ...groups, [slot.date]: [...(groups[slot.date] ?? []), slot] }), {});
+
+    return (
+        <div className="max-h-80 space-y-3 overflow-y-auto overscroll-contain pr-1" role="group" aria-label="Horarios libres por día">
+            {Object.entries(byDay).map(([date, slots]) => (
+                <section key={date} className="rounded-xl border border-primary/15 bg-primary-soft/50 p-3 sm:p-4">
+                    <h4 className="flex items-baseline justify-between gap-2 text-sm font-bold text-ink">
+                        {longDayLabel(date)}
+                        <span className="text-xs font-normal text-ink-muted">{slots.length} {slots.length === 1 ? 'horario' : 'horarios'}</span>
+                    </h4>
+                    <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
+                        {slots.map((slot) => {
+                            const picked = value?.startsAt === slot.startsAt && value?.professionalId === slot.professionalId;
+
+                            return (
+                                <button
+                                    key={`${slot.startsAt}-${slot.professionalId}`}
+                                    type="button"
+                                    aria-pressed={picked}
+                                    onClick={() => onPick(slot)}
+                                    className={`flex min-h-11 flex-col items-center justify-center rounded-lg border px-2 py-1.5 text-sm font-semibold tabular-nums transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-primary ${
+                                        picked ? 'border-primary bg-primary text-white shadow-card' : 'border-field bg-card text-ink hover:border-primary/60'
+                                    }`}
+                                >
+                                    {slot.label}
+                                    {!professionalId && <span className={`w-full truncate text-center text-[11px] font-normal ${picked ? 'text-white/80' : 'text-ink-muted'}`}>{slot.professionalName}</span>}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </section>
+            ))}
+        </div>
+    );
+}
+
+/** New appointment, or a new time for an existing one (`appointment`). Saving goes through the same rules as every other channel. */
+export default function AppointmentDialog({ appointment, options, today, onClose }) {
+    const rescheduling = Boolean(appointment);
+    const [serviceId, setServiceId] = useState(appointment?.serviceId ?? '');
+    const [professionalId, setProfessionalId] = useState(appointment?.professionalId ?? '');
+    const [locationId, setLocationId] = useState(options.locations?.length === 1 ? options.locations[0].id : '');
+    const [from, setFrom] = useState(today);
+    const [slot, setSlot] = useState(null);
+    const [dropped, setDropped] = useState(null);
+    const [customer, setCustomer] = useState({ name: '', phone: '', email: '' });
+    // The card of Clientes this booking is tied to (picked), or the request to save the person as a new card. Both optional and for roles that may use Clientes.
+    const [picked, setPicked] = useState(null);
+    const [saveAsClient, setSaveAsClient] = useState(false);
+    // Marketing consent is explicit and only asked when a NEW card is saved: whether the person authorized it and through which channel (the server stamps the date and time).
+    const [consent, setConsent] = useState({ granted: false, channel: '' });
+    const [notes, setNotes] = useState('');
+    const [errors, setErrors] = useState({});
+    const [saving, setSaving] = useState(false);
+
+    const locations = options.locations ?? [];
+    const services = options.services.map((service) => ({ value: service.id, label: service.name }));
+    const service = options.services.find((item) => String(item.id) === String(serviceId));
+    // The sedes offered are only those where the chosen service is offered (the service comes first); the server checks it again on the booking.
+    const placeOptions = locationsForService(locations, service);
+    const needsLocation = !rescheduling && options.locationRequired && !locationId;
+    // Only professionals who perform the service and work in the sede are offered; if a change makes the one chosen before incompatible, it is dropped out loud.
+    const professionals = [{ value: '', label: 'Cualquiera disponible' }, ...professionalsFor(options.professionals, serviceId, locationId).map((professional) => ({ value: professional.id, label: professional.name }))];
+
+    // Choosing a service recalculates the sedes: one that no longer offers it is cleared out loud, and when only one offers it that one is chosen.
+    const changeService = (value) => {
+        setServiceId(value);
+        const next = options.services.find((item) => String(item.id) === String(value));
+        const places = locationsForService(locations, next);
+        let place = locationId;
+        let notice = null;
+
+        if (locationId && !places.some((item) => String(item.id) === String(locationId))) {
+            place = '';
+            notice = 'La sede elegida no ofrece este servicio: elige otra de la lista.';
+        }
+
+        if (!place && places.length === 1) place = places[0].id;
+
+        setLocationId(place);
+        narrow(value, place);
+        if (notice && !place) setDropped(notice);
+    };
+
+    const narrow = (nextService, nextLocation) => {
+        setSlot(null);
+
+        if (!stillCompatible(options.professionals, professionalId, nextService, nextLocation)) {
+            const name = options.professionals.find((professional) => String(professional.id) === String(professionalId))?.name ?? 'El profesional';
+            setProfessionalId('');
+            setDropped(`${name} ya no aplica para este servicio o sede: elige otro profesional o deja «Cualquiera disponible».`);
+        } else {
+            setDropped(null);
+        }
+    };
+
+    const submit = (event) => {
+        event.preventDefault();
+        if (!slot) return setErrors({ starts_at: 'Elige un horario libre.' });
+
+        const payload = rescheduling
+            ? { starts_at: slot.startsAt, professional_id: slot.professionalId ?? undefined }
+            : { service_id: serviceId, professional_id: slot.professionalId ?? undefined, location_id: locationId || undefined, starts_at: slot.startsAt, customer, notes, central_customer_id: picked?.id, save_as_client: !picked && saveAsClient ? true : undefined, ...(!picked && saveAsClient && consent.granted ? { consent_granted: true, consent_channel: consent.channel } : {}) };
+
+        router.post(rescheduling ? route('bookings.reschedule', appointment.id) : route('bookings.store'), payload, {
+            preserveScroll: true,
+            onStart: () => setSaving(true),
+            onFinish: () => setSaving(false),
+            onError: (bag) => setErrors(bag),
+            onSuccess: (page) => {
+                if (!page.props.flash?.error) onClose();
+            },
+        });
+    };
+
+    return (
+        <Modal show onClose={onClose} maxWidth="2xl" scrollable>
+            <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
+                <header className="border-b border-line px-5 py-4 sm:px-8">
+                    <h2 className="text-lg font-bold text-ink">{rescheduling ? 'Reprogramar cita' : 'Nueva cita'}</h2>
+                    {rescheduling && <p className="mt-1 text-sm text-ink-muted">{appointment.service} · {appointment.dateLabel} {appointment.timeLabel}</p>}
+                </header>
+                <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5 sm:px-8">
+                    {options.error && <Alert tone="warning">{options.error}</Alert>}
+                    {dropped && <Alert tone="warning">{dropped}</Alert>}
+                    <div className="grid gap-4 sm:grid-cols-2">
+                        {!rescheduling && (
+                            <div>
+                                <InputLabel htmlFor="appt_service" value="Servicio" />
+                                <SearchableSelect id="appt_service" className="mt-1" value={serviceId} onChange={(value) => changeService(value)} options={services} placeholder="Escribe para buscar o elige" invalid={Boolean(errors.service_id)} />
+                                <InputError message={errors.service_id} className="mt-1" />
+                            </div>
+                        )}
+                        {!rescheduling && locations.length > 0 && (
+                            <div>
+                                <InputLabel htmlFor="appt_location" value={options.locationRequired ? 'Sede' : 'Sede (opcional)'} />
+                                <Select id="appt_location" className="mt-1" value={locationId} disabled={!service} onChange={(value) => { setLocationId(value); narrow(serviceId, value); }} options={options.locationRequired ? placeOptions.map((l) => ({ value: l.id, label: l.name })) : [{ value: '', label: 'Sin sede' }, ...placeOptions.map((l) => ({ value: l.id, label: l.name }))]} placeholder={service ? (placeOptions.length === 0 ? 'Este servicio no tiene sedes activas' : 'Elige una sede') : 'Elige primero el servicio'} invalid={Boolean(errors.location_id)} />
+                                <InputError message={errors.location_id} className="mt-1" />
+                            </div>
+                        )}
+                        <div>
+                            <InputLabel htmlFor="appt_pro" value="Profesional" />
+                            <SearchableSelect id="appt_pro" className="mt-1" value={professionalId} onChange={(value) => { setProfessionalId(value); setSlot(null); setDropped(null); }} options={professionals} placeholder="Escribe para buscar o elige" />
+                        </div>
+                        <div>
+                            <DateField id="appt_from" label="Buscar desde" clearable={false} today={today} value={from} min={today} onChange={(value) => { setFrom(value || today); setSlot(null); }} />
+                        </div>
+                    </div>
+
+                    <div>
+                        <p className="mb-2 text-sm font-medium text-ink">Horarios libres</p>
+                        {needsLocation ? <p className="text-sm text-ink-muted">Elige la sede para ver los horarios libres.</p> : <SlotPicker serviceId={serviceId} professionalId={professionalId} locationId={locationId} from={from} value={slot} onPick={setSlot} ignoreAppointment={appointment?.id} />}
+                        {!rescheduling && service && service.price !== null && service.price !== undefined && (
+                            <p className="mt-2 text-xs text-ink-muted">Precio actual del servicio: {new Intl.NumberFormat('es', { style: 'currency', currency: options.currency }).format(service.price)}. Queda registrado en la cita; si cambia después, esta cita conserva el de hoy.</p>
+                        )}
+                        <InputError message={errors.starts_at} className="mt-1" />
+                    </div>
+
+                    {!rescheduling && (
+                        <section aria-labelledby="appt_who" className="space-y-5 rounded-xl border border-line bg-canvas/40 p-4 sm:p-5">
+                            <header className="flex items-start gap-3">
+                                <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+                                    <UserRound className="size-5" aria-hidden="true" />
+                                </span>
+                                <div>
+                                    <h3 id="appt_who" className="text-sm font-bold text-ink">Quién reserva</h3>
+                                    <p className="text-xs text-ink-muted">Los datos mínimos para identificar y contactar a la persona.</p>
+                                </div>
+                            </header>
+                            <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
+                                <ClientNameField
+                                    capabilities={options.clients}
+                                    name={customer.name}
+                                    picked={picked}
+                                    error={errors['customer.name']}
+                                    onName={(value) => {
+                                        // Editing the name of a chosen customer unlinks it (the link is explicit, never inferred from the text) and drops the phone and e-mail that came from that card:
+                                        // they belong to the other person.
+                                        if (picked && value !== picked.name) {
+                                            setCustomer({ name: value, phone: picked.lockPhone ? '' : customer.phone, email: picked.lockEmail ? '' : customer.email });
+                                            setPicked(null);
+
+                                            return;
+                                        }
+
+                                        setCustomer({ ...customer, name: value });
+                                    }}
+                                    onPick={(client) => {
+                                        setPicked({ id: client.id, name: client.name, consentLabel: client.consentLabel, lockPhone: Boolean(client.phone), lockEmail: Boolean(client.email) });
+                                        setSaveAsClient(false);
+                                        setConsent({ granted: false, channel: '' });
+                                        setCustomer({ name: client.name, phone: client.phone ?? '', email: client.email ?? '' });
+                                    }}
+                                    onCreate={() => setSaveAsClient(true)}
+                                />
+                                <div>
+                                    <InputLabel htmlFor="appt_phone" value="Teléfono" />
+                                    <TextInput id="appt_phone" type="tel" className="mt-1" placeholder="+573001112233" value={customer.phone} maxLength={32} readOnly={Boolean(picked?.lockPhone)} onChange={(e) => setCustomer({ ...customer, phone: e.target.value })} invalid={Boolean(errors['customer.phone'])} />
+                                    <p className="mt-1.5 text-xs text-ink-muted">Con el prefijo del país, por ejemplo +573001112233.</p>
+                                    <InputError message={errors['customer.phone']} className="mt-1" />
+                                </div>
+                                <div className="sm:col-span-2">
+                                    <InputLabel htmlFor="appt_email" value="Correo (opcional)" />
+                                    <TextInput id="appt_email" type="email" className="mt-1" value={customer.email} maxLength={160} readOnly={Boolean(picked?.lockEmail)} onChange={(e) => setCustomer({ ...customer, email: e.target.value })} invalid={Boolean(errors['customer.email'])} />
+                                    <InputError message={errors['customer.email']} className="mt-1" />
+                                </div>
+                                <div className="sm:col-span-2">
+                                    <InputLabel htmlFor="appt_notes" value="Nota (opcional)" />
+                                    <Textarea id="appt_notes" rows={2} className="mt-1" aria-describedby="appt_notes_hint" value={notes} maxLength={500} onChange={(e) => setNotes(e.target.value)} />
+                                    <p id="appt_notes_hint" className="mt-1.5 text-xs text-ink-muted">Solo datos para organizar la cita. No registres diagnósticos ni información médica: Ava no tiene una política definida para guardarla.</p>
+                                </div>
+                                <RelationStatus capabilities={options.clients} picked={picked} saveAsClient={saveAsClient} onUnlink={() => { setCustomer({ name: customer.name, phone: picked?.lockPhone ? '' : customer.phone, email: picked?.lockEmail ? '' : customer.email }); setPicked(null); }} />
+                                <SaveInListing capabilities={options.clients} picked={picked} checked={saveAsClient} onChange={setSaveAsClient} consent={consent} onConsent={setConsent} errors={errors} />
+                            </div>
+                        </section>
+                    )}
+                </div>
+                <div className="flex justify-end gap-3 border-t border-line bg-card px-5 py-4 sm:px-8">
+                    <SecondaryButton type="button" onClick={onClose}>
+                        Cancelar
+                    </SecondaryButton>
+                    <PrimaryButton type="submit" disabled={saving || !slot}>
+                        {rescheduling ? 'Reprogramar' : 'Crear cita'}
+                    </PrimaryButton>
+                </div>
+            </form>
+        </Modal>
+    );
+}

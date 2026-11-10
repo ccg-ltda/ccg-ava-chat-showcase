@@ -1,0 +1,317 @@
+import { Head, router } from '@inertiajs/react';
+import { Cable, Plug, Plus, Radio, Webhook, Workflow } from 'lucide-react';
+import { useState } from 'react';
+import Alert from '@/Components/Alert';
+import CopyBlock from '@/Components/CopyBlock';
+import { useConfirm } from '@/Components/ConfirmDialog';
+import useAccess from '@/Hooks/useAccess';
+import EmptyState from '@/Components/EmptyState';
+import PageHeader from '@/Components/PageHeader';
+import PrimaryButton from '@/Components/PrimaryButton';
+import Tabs from '@/Components/Tabs';
+import { ReadOnlyWorkspaceNotice, WorkspaceViewSelector } from '@/Components/WorkspaceViewSelector';
+import AppLayout from '@/Layouts/AppLayout';
+import ApiCallHistory from './Partials/ApiCallHistory';
+import AutomationCard from './Partials/AutomationCard';
+import ChannelCard from './Partials/ChannelCard';
+import ChannelIntegrationModal from './Partials/ChannelIntegrationModal';
+import MetaConfigModal from './Partials/MetaConfigModal';
+import MetaPagesModal from './Partials/MetaPagesModal';
+import IntegrationCard from './Partials/IntegrationCard';
+import IntegrationFormModal from './Partials/IntegrationFormModal';
+import InboundEndpointsSection from './Partials/InboundEndpointsSection';
+import WebhooksSection from './Partials/WebhooksSection';
+
+/**
+ * Integraciones. Parts: n8n (the automation, as the Workspace can verify it), the channels of the global catalog (WhatsApp, Instagram... the same for every Workspace)
+ * with what THIS Workspace has configured for each, and the Workspace's generic connections (HTTP/REST today). An
+ * administrator of the platform can look (read only) at one other Workspace. Results arrive as the global toasts.
+ */
+const TABS = ['canales', 'automatizaciones', 'conexiones', 'webhooks'];
+
+const initialTab = () => {
+    const requested = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('tab');
+
+    return Math.max(0, TABS.indexOf(requested));
+};
+
+export default function Index({ channels, providers = [], paymentGateways = [], labPaymentLink = null, integrations, catalog, automation, metaPages = null, metaPlatform = null, webhooks = null, newWebhookSecret = null, inboundWebhooks = null, newInboundSecret = null, scope }) {
+    const confirm = useConfirm();
+    const readOnly = scope.readOnly;
+    // Each change has its own permission; the server enforces them, this only offers what the role can do.
+    const { permissions } = useAccess();
+    const can = {
+        edit: permissions.includes('manage-integrations'),
+        test: permissions.includes('test-integrations'),
+        toggle: permissions.includes('activate-integrations'),
+        remove: permissions.includes('delete-integrations'),
+    };
+    const webhookCan = { manage: permissions.includes('manage-webhooks') };
+    const [editing, setEditing] = useState(null); // null = closed, 'new' = creating, otherwise the integration
+    const [configuring, setConfiguring] = useState(null); // the channel being configured
+    const [configuringProvider, setConfiguringProvider] = useState(null); // the external agenda being configured
+    const [configuringGateway, setConfiguringGateway] = useState(null); // the payment gateway being configured
+    const [metaKey, setMetaKey] = useState(null); // 'instagram' | 'messenger': the Meta channel whose «Configurar» is open (looked up in `channels` so it always shows what the server just saved)
+    const [testingId, setTestingId] = useState(null);
+    const [tab, setTab] = useState(initialTab);
+    const selectTab = (index) => {
+        setTab(index);
+        const url = new URL(window.location.href);
+        url.searchParams.set('tab', TABS[index]);
+        window.history.replaceState(window.history.state, '', url);
+    };
+
+    const toggle = async (integration) => {
+        const deactivating = integration.isActive;
+        const confirmed = await confirm({
+            description: deactivating
+                ? `${integration.name} dejará de usarse para conexiones reales, pero conserva su configuración y puede reactivarse.`
+                : `${integration.name} volverá a poder usarse para conexiones reales.`,
+            confirmLabel: deactivating ? 'Desactivar' : 'Activar',
+        });
+
+        if (confirmed) {
+            router.post(route(deactivating ? 'integrations.deactivate' : 'integrations.activate', integration.id), {}, { preserveScroll: true });
+        }
+    };
+
+    // Retiring a connection deletes its row (and the credentials in it); only an inactive generic connection can be retired, and the audit log keeps who did it.
+    const remove = async (integration) => {
+        const confirmed = await confirm({
+            description: `«${integration.name}» se retirará de este Workspace junto con la configuración y las credenciales guardadas. No se puede deshacer; el historial de Auditoría conserva el registro de quién la creó y quién la retiró.`,
+            confirmLabel: 'Retirar conexión',
+        });
+
+        if (confirmed) router.delete(route('integrations.destroy', integration.id), { preserveScroll: true });
+    };
+
+    // A channel test only reads from the provider (it changes nothing there), so it needs no confirmation.
+    const testChannel = (channel) =>
+        router.post(route('integrations.test', channel.integration.id), {}, {
+            preserveScroll: true,
+            onStart: () => setTestingId(`channel-${channel.key}`),
+            onFinish: () => setTestingId(null),
+        });
+
+    const test = async (integration) => {
+        const { method } = integration.summary;
+
+        // A test sends the configured request as it is: warn before anything that may change data on the other side.
+        if (method !== 'GET') {
+            const confirmed = await confirm({
+                description: `La prueba enviará una solicitud ${method} real a ${integration.summary.host}. Si ese método modifica datos en el servicio, se modificarán.`,
+                confirmLabel: 'Probar conexión',
+            });
+
+            if (!confirmed) return;
+        }
+
+        router.post(route('integrations.test', integration.id), {}, {
+            preserveScroll: true,
+            onStart: () => setTestingId(integration.id),
+            onFinish: () => setTestingId(null),
+        });
+    };
+
+    return (
+        <>
+            <Head title="Integraciones" />
+
+            <PageHeader title="Integraciones" description="Conecta Ava con otros servicios. Cada Workspace configura las suyas.">
+                <WorkspaceViewSelector scope={scope} routeName="integrations.index" id="integrations_workspace" />
+                {!readOnly && can.edit && (
+                    <PrimaryButton type="button" onClick={() => setEditing('new')} className="gap-2">
+                        <Plus className="size-4" aria-hidden="true" />
+                        Nueva integración
+                    </PrimaryButton>
+                )}
+            </PageHeader>
+
+            <ReadOnlyWorkspaceNotice scope={scope} what="las integraciones" />
+
+            <Tabs
+                tabs={[
+                    { id: 'canales', label: 'Canales', icon: Radio },
+                    { id: 'automatizaciones', label: 'Automatizaciones', icon: Workflow },
+                    { id: 'conexiones', label: 'Conexiones API', icon: Cable },
+                    { id: 'webhooks', label: 'Webhooks', icon: Webhook },
+                ]}
+                selectedIndex={tab}
+                onChange={selectTab}
+            >
+                <>
+            <section aria-labelledby="channels-heading" className="space-y-4">
+                <div>
+                    <h2 id="channels-heading" className="text-lg font-bold text-ink">
+                        Canales
+                    </h2>
+                    <p className="text-sm text-ink-muted">Las cuentas de mensajería por las que pueden responder los chatbots.</p>
+                </div>
+                <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+                    {channels.map((channel, index) => (
+                        <ChannelCard
+                            key={channel.key}
+                            channel={channel}
+                            delay={index * 50}
+                            readOnly={readOnly}
+                            can={can}
+                            testing={testingId === `channel-${channel.key}`}
+                            onTest={() => testChannel(channel)}
+                            platformEditable={Boolean(metaPlatform)}
+                            onConfigure={() => setConfiguring(channel)}
+                            onConfigureMeta={() => setMetaKey(channel.key)}
+                            onToggle={() => toggle({ id: channel.integration.id, name: channel.label, isActive: channel.integration.isActive })}
+                        />
+                    ))}
+                </div>
+            </section>
+
+                </>
+                <>
+            <section aria-labelledby="automation-heading" className="space-y-4">
+                <div>
+                    <h2 id="automation-heading" className="text-lg font-bold text-ink">
+                        Automatización
+                    </h2>
+                    <p className="text-sm text-ink-muted">Quién ejecuta el flujo de cada chatbot.</p>
+                </div>
+                <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+                    <AutomationCard automation={automation} readOnly={readOnly} workspaceId={readOnly ? scope.workspace.id : undefined} />
+                </div>
+            </section>
+
+                </>
+                <>
+            {providers.length > 0 && (
+                <section aria-labelledby="agendas-heading" className="space-y-4">
+                    <div>
+                        <h2 id="agendas-heading" className="text-lg font-bold text-ink">
+                            Servicios externos
+                        </h2>
+                        <p className="text-sm text-ink-muted">Proveedores de terceros que cada Workspace conecta por su cuenta. Hoy son agendas (Booker): una agenda externa puede ser la fuente de verdad de tus citas en lugar de la agenda de Ava, y se elige en Agenda y reservas → Configuración.</p>
+                    </div>
+                    <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+                        {providers.map((provider, index) => (
+                            <ChannelCard
+                                key={provider.key}
+                                channel={provider}
+                                delay={index * 50}
+                                readOnly={readOnly}
+                                can={can}
+                                testing={testingId === `channel-${provider.key}`}
+                                onTest={() => testChannel(provider)}
+                                onConfigure={() => setConfiguringProvider(provider)}
+                                onToggle={() => toggle({ id: provider.integration.id, name: provider.label, isActive: provider.integration.isActive })}
+                            />
+                        ))}
+                    </div>
+                </section>
+            )}
+
+            {paymentGateways.length > 0 && (
+                <section aria-labelledby="gateways-heading" className="space-y-4">
+                    <div>
+                        <h2 id="gateways-heading" className="text-lg font-bold text-ink">
+                            Pasarelas de pago
+                        </h2>
+                        <p className="text-sm text-ink-muted">Las cuentas con las que este Workspace cobra a sus clientes. Cada una es propia del Workspace y solo se ofrece a tus clientes cuando tu plan la incluye y la conexión está validada.</p>
+                    </div>
+                    {labPaymentLink && (
+                        <Alert tone="info">
+                            <p className="font-semibold">Enlace del pago de prueba (Sandbox)</p>
+                            <p className="mt-1 text-sm">Ábrelo y paga con una tarjeta de prueba del proveedor. Si el pago se aprueba, la conexión queda validada. El enlace vence en 72 horas y no se vuelve a mostrar.</p>
+                            <CopyBlock value={labPaymentLink} label="Enlace del pago de prueba" />
+                        </Alert>
+                    )}
+                    <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+                        {paymentGateways.map((gateway, index) => (
+                            <ChannelCard
+                                key={gateway.key}
+                                channel={gateway}
+                                delay={index * 50}
+                                readOnly={readOnly}
+                                can={can}
+                                testing={testingId === `channel-${gateway.key}`}
+                                onTest={() => testChannel(gateway)}
+                                onConfigure={() => setConfiguringGateway(gateway)}
+                                onLabPayment={() => router.post(route('integrations.payment-gateways.lab-payment', gateway.key), {}, { preserveScroll: true })}
+                                onToggle={() => toggle({ id: gateway.integration.id, name: gateway.label, isActive: gateway.integration.isActive })}
+                            />
+                        ))}
+                    </div>
+                </section>
+            )}
+
+            <section aria-labelledby="connections-heading" className="space-y-4">
+                <div>
+                    <h2 id="connections-heading" className="text-lg font-bold text-ink">
+                        Conexiones API
+                    </h2>
+                    <p className="text-sm text-ink-muted">Conexiones genéricas a otros servicios mediante sus APIs.</p>
+                </div>
+
+                {integrations.length === 0 ? (
+                    <EmptyState icon={Plug} title="Todavía no hay conexiones API" description={readOnly ? 'Este Workspace no tiene conexiones API.' : 'Crea la primera para conectar este Workspace con un servicio externo.'}>
+                        {!readOnly && can.edit && (
+                            <PrimaryButton type="button" onClick={() => setEditing('new')} className="gap-2">
+                                <Plus className="size-4" aria-hidden="true" />
+                                Nueva integración
+                            </PrimaryButton>
+                        )}
+                    </EmptyState>
+                ) : (
+                    <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+                        {integrations.map((integration, index) => (
+                            <IntegrationCard
+                                key={integration.id}
+                                integration={integration}
+                                delay={index * 50}
+                                testing={testingId === integration.id}
+                                readOnly={readOnly}
+                                can={can}
+                                onEdit={() => setEditing(integration)}
+                                onTest={() => test(integration)}
+                                onToggle={() => toggle(integration)}
+                                onRemove={() => remove(integration)}
+                            />
+                        ))}
+                    </div>
+                )}
+            </section>
+
+            {!readOnly && <ApiCallHistory />}
+                </>
+                <>
+            {!readOnly && webhooks ? (
+                <div className="space-y-10">
+                    {inboundWebhooks && <InboundEndpointsSection inbound={inboundWebhooks} newSecret={newInboundSecret} can={webhookCan} />}
+                    <WebhooksSection webhooks={webhooks} newSecret={newWebhookSecret} can={webhookCan} />
+                </div>
+            ) : (
+                <Alert tone="info">Los webhooks no están disponibles para tu rol, o este Workspace está en modo consulta.</Alert>
+            )}
+                </>
+            </Tabs>
+
+            {metaPages && metaPages.length > 0 && !scope.readOnly && <MetaPagesModal pages={metaPages} />}
+            {metaKey && channels.find((channel) => channel.key === metaKey) && (
+                <MetaConfigModal
+                    key={metaKey}
+                    channel={channels.find((channel) => channel.key === metaKey)}
+                    platform={metaPlatform}
+                    can={can}
+                    testing={testingId === `channel-${metaKey}`}
+                    onTest={() => testChannel(channels.find((channel) => channel.key === metaKey))}
+                    onToggle={() => { const target = channels.find((channel) => channel.key === metaKey); toggle({ id: target.integration.id, name: target.label, isActive: target.integration.isActive }); }}
+                    onClose={() => setMetaKey(null)}
+                />
+            )}
+            {configuring && <ChannelIntegrationModal key={configuring.key} channel={configuring} onClose={() => setConfiguring(null)} />}
+            {configuringGateway && <ChannelIntegrationModal key={configuringGateway.key} channel={configuringGateway} routeName="integrations.payment-gateways.update" onClose={() => setConfiguringGateway(null)} />}
+            {configuringProvider && <ChannelIntegrationModal key={configuringProvider.key} channel={configuringProvider} routeName="integrations.providers.update" onClose={() => setConfiguringProvider(null)} />}
+            {editing && <IntegrationFormModal key={editing === 'new' ? 'new' : editing.id} integration={editing === 'new' ? null : editing} catalog={catalog} onClose={() => setEditing(null)} />}
+        </>
+    );
+}
+
+Index.layout = (page) => <AppLayout>{page}</AppLayout>;
